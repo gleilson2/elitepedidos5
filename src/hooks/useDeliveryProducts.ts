@@ -36,8 +36,8 @@ export const useDeliveryProducts = () => {
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
       if (!supabaseUrl || !supabaseKey || 
-          supabaseUrl === 'https://afceshaeqqmbrtudlhwz.supabase.co' || 
-          supabaseKey === 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmY2VzaGFlcXFtYnJ0dWRsaHd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ2ODU3MTEsImV4cCI6MjA2MDI2MTcxMX0.-d9660Q-9wg89z0roOw4-czkWxq2fxdKOJX9SilKz2U' ||
+          supabaseUrl === 'your_supabase_url_here' || 
+          supabaseKey === 'your_supabase_anon_key_here' ||
           supabaseUrl.includes('placeholder')) {
         console.warn('⚠️ Supabase não configurado - usando produtos de demonstração');
         
@@ -305,8 +305,6 @@ export const useDeliveryProducts = () => {
         });
     }
 
-        .select('*')
-        .single();
     return () => {
       if (channel) {
         console.log('🔌 Desconectando subscription em tempo real...');

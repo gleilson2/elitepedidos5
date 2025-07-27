@@ -177,7 +177,7 @@ export const useDeliveryProducts = () => {
         throw new Error(`Erro ao atualizar produto: ${error.message || 'Erro desconhecido'}`);
       }
 
-      if (!data || data.length === 0) {
+      if (!updatedData) {
         // No rows were updated - values were already the same
         console.log('ℹ️ Nenhuma linha foi atualizada - valores já eram os mesmos');
         
@@ -195,7 +195,7 @@ export const useDeliveryProducts = () => {
         return updatedProduct;
       }
 
-      const updatedProduct = data[0];
+      const updatedProduct = updatedData;
       console.log('✅ Produto atualizado no banco:', updatedProduct);
 
       // Update local state
@@ -219,7 +219,7 @@ export const useDeliveryProducts = () => {
     try {
       console.log('🗑️ Excluindo produto:', id);
       
-      const { error } = await supabase
+      const { data: updatedData, error } = await supabase
         .from('delivery_products')
         .delete()
         .eq('id', id);
@@ -305,7 +305,6 @@ export const useDeliveryProducts = () => {
         });
     }
 
-    // Cleanup function
     return () => {
       if (channel) {
         console.log('🔌 Desconectando subscription em tempo real...');
