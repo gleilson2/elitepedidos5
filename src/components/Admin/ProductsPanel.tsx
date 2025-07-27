@@ -1,8 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../../lib/supabase';
+import { useDeliveryProducts } from '../../hooks/useDeliveryProducts';
+import { 
+  Package, 
+  Plus, 
+  Edit3, 
+  Trash2, 
+  Save, 
+  X, 
+  Eye, 
+  EyeOff, 
+  Search,
+  AlertCircle,
+  CheckCircle,
+  Upload,
+  Image as ImageIcon
+} from 'lucide-react';
+import ImageUploadModal from './ImageUploadModal';
 
-export interface DeliveryProduct {
+interface ProductFormData {
   id: string;
   name: string;
   category: 'acai' | 'combo' | 'milkshake' | 'vitamina' | 'sorvetes' | 'bebidas' | 'complementos' | 'sobremesas' | 'outros';
@@ -17,313 +33,689 @@ export interface DeliveryProduct {
   sizes?: any;
   scheduled_days?: any;
   availability_type?: string;
-  created_at: string;
-  updated_at: string;
 }
 
-export const useDeliveryProducts = () => {
-  const [products, setProducts] = useState<DeliveryProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const ProductsPanel: React.FC = () => {
+  const { products, loading, createProduct, updateProduct, deleteProduct, refetch } = useDeliveryProducts();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [editingProduct, setEditingProduct] = useState<ProductFormData | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showImageUpload, setShowImageUpload] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [lastSaveAttempt, setLastSaveAttempt] = useState<Date | null>(null);
 
-  const fetchProducts = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Check if Supabase is properly configured
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
-      if (!supabaseUrl || !supabaseKey || 
-          supabaseUrl === 'your_supabase_url_here' || 
-          supabaseKey === 'your_supabase_anon_key_here' ||
-          supabaseUrl.includes('placeholder')) {
-        console.warn('⚠️ Supabase não configurado - usando produtos de demonstração');
-        
-        // Fallback para produtos de demonstração se Supabase não estiver configurado
-        const { products: demoProducts } = await import('../data/products');
-        const mappedProducts = demoProducts.map(product => ({
-          id: product.id,
-          name: product.name,
-          category: product.category as DeliveryProduct['category'],
-          price: product.price,
-          original_price: product.originalPrice,
-          description: product.description,
-          image_url: product.image,
-          is_active: product.isActive !== false,
-          is_weighable: product.is_weighable || false,
-          price_per_gram: product.pricePerGram,
-          complement_groups: product.complementGroups,
-          sizes: product.sizes,
-          scheduled_days: product.scheduledDays,
-          availability_type: product.availability?.type || 'always',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }));
-        
-        setProducts(mappedProducts);
-        setLoading(false);
-        return;
-      }
-      
-      console.log('🔄 Carregando produtos do banco de dados...');
-      
-      const { data, error } = await supabase
-        .from('delivery_products')
-        .select('*')
-        .order('name');
+  const categories = [
+    { id: 'all', label: 'Todas as Categorias' },
+    { id: 'acai', label: 'Açaí' },
+    { id: 'combo', label: 'Combos' },
+    { id: 'milkshake', label: 'Milkshakes' },
+    { id: 'vitamina', label: 'Vitaminas' },
+    { id: 'sorvetes', label: 'Sorvetes' },
+    { id: 'bebidas', label: 'Bebidas' },
+    { id: 'complementos', label: 'Complementos' },
+    { id: 'sobremesas', label: 'Sobremesas' },
+    { id: 'outros', label: 'Outros' }
+  ];
 
-      if (error) throw error;
-      
-      console.log(`✅ ${data?.length || 0} produtos carregados do banco`);
-      setProducts(data || []);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Erro ao carregar produtos';
-      console.error('❌ Erro ao carregar produtos:', errorMessage);
-      setError(errorMessage);
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const createProduct = useCallback(async (product: Omit<DeliveryProduct, 'id' | 'created_at' | 'updated_at'>) => {
-    try {
-      console.log('🚀 Criando produto:', product);
-      
-      const { data, error } = await supabase
-        .from('delivery_products')
-        .insert([{
-          ...product,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      
-      setProducts(prev => [...prev, data]);
-      console.log('✅ Produto criado:', data);
-      return data;
-    } catch (err) {
-      console.error('❌ Erro ao criar produto:', err);
-      throw new Error(err instanceof Error ? err.message : 'Erro ao criar produto');
-    }
-  }, []);
-
-  const updateProduct = useCallback(async (id: string, updates: Partial<DeliveryProduct>) => {
-    try {
-      console.log('✏️ Atualizando produto:', id, updates);
-
-      // Check if Supabase is configured
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-        throw new Error('Supabase não configurado. Configure as variáveis de ambiente para usar esta funcionalidade.');
-      }
-
-      // 1. First check if the product exists in the database
-      const { data: existingProduct, error: checkError } = await supabase
-        .from('delivery_products')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (checkError) {
-        console.error('❌ Erro ao verificar produto existente:', checkError);
-        throw new Error(`Erro ao verificar produto: ${checkError.message}`);
-      }
-
-      if (!existingProduct) {
-        console.error('❌ Produto não encontrado no banco:', id);
-        console.log('🔍 Produtos disponíveis no estado local:', products.map(p => ({ id: p.id, name: p.name })));
-        
-        // Try to refresh products from database
-        console.log('🔄 Tentando recarregar produtos do banco...');
-        await fetchProducts();
-        
-        throw new Error(`Produto com ID ${id} não foi encontrado no banco de dados. O produto pode ter sido excluído ou criado apenas localmente. Tente recarregar a página.`);
-      }
-
-      console.log('✅ Produto encontrado no banco:', existingProduct);
-
-      // 2. Prepare clean update data
-      const { created_at, updated_at, has_complements, ...cleanUpdates } = updates as any;
-
-      // 3. Remove undefined values and add updated_at
-      const safeUpdate = Object.fromEntries(
-        Object.entries({
-          ...cleanUpdates,
-          updated_at: new Date().toISOString()
-        }).filter(([, value]) => value !== undefined)
-      );
-
-      console.log('📝 Dados para atualização:', {
-        id,
-        safeUpdate,
-        originalUpdates: updates
-      });
-
-      // 4. Perform the update
-      const { data: updatedData, error } = await supabase
-        .from('delivery_products')
-        .update(safeUpdate)
-        .eq('id', id)
-        .select('*')
-
-      if (error) {
-        console.error('❌ Erro ao atualizar produto:', error);
-        throw new Error(`Erro ao atualizar produto: ${error.message || 'Erro desconhecido'}`);
-      }
-
-      if (!updatedData) {
-        // No rows were updated - values were already the same
-        console.log('ℹ️ Nenhuma linha foi atualizada - valores já eram os mesmos');
-        
-        // Return the existing product with updates applied
-        const updatedProduct = {
-          ...existingProduct,
-          ...cleanUpdates,
-          updated_at: new Date().toISOString()
-        };
-        
-        // Update local state
-        setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
-        
-        console.log('✅ Produto atualizado localmente (sem mudanças no banco)');
-        return updatedProduct;
-      }
-
-      const updatedProduct = updatedData;
-      console.log('✅ Produto atualizado no banco:', updatedProduct);
-
-      // Update local state
-      setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
-      
-      console.log('✅ Estado local atualizado');
-      return updatedProduct;
-
-    } catch (err) {
-      console.error('❌ Erro ao atualizar produto:', err);
-      throw err;
-    }
-  }, [fetchProducts, products]);
-
-  const syncWithDatabase = useCallback(async () => {
-    console.log('🔄 Sincronizando produtos com banco de dados...');
-    await fetchProducts();
-  }, [fetchProducts]);
-
-  const deleteProduct = useCallback(async (id: string) => {
-    try {
-      console.log('🗑️ Excluindo produto:', id);
-      
-      const { data: updatedData, error } = await supabase
-        .from('delivery_products')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      
-      setProducts(prev => prev.filter(p => p.id !== id));
-      console.log('✅ Produto excluído');
-    } catch (err) {
-      console.error('❌ Erro ao excluir produto:', err);
-      throw new Error(err instanceof Error ? err.message : 'Erro ao excluir produto');
-    }
-  }, []);
-
-  // Configurar subscription em tempo real
-  useEffect(() => {
-    let channel: RealtimeChannel | null = null;
-
-    // Verificar se Supabase está configurado
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const filteredProducts = React.useMemo(() => {
+    let result = products;
     
-    if (!supabaseUrl || !supabaseKey || 
-        supabaseUrl === 'your_supabase_url_here' || 
-        supabaseKey === 'your_supabase_anon_key_here' ||
-        supabaseUrl.includes('placeholder')) {
-      console.log('⚠️ Supabase não configurado - subscription em tempo real desabilitada');
-    } else {
-      console.log('🔄 Configurando subscription em tempo real para produtos...');
-      
-      channel = supabase
-        .channel('delivery_products_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'delivery_products'
-          },
-          (payload) => {
-            console.log('📡 Mudança detectada na tabela delivery_products:', payload);
-            
-            switch (payload.eventType) {
-              case 'INSERT':
-                if (payload.new) {
-                  console.log('➕ Produto adicionado:', payload.new);
-                  setProducts(prev => {
-                    // Verificar se o produto já existe para evitar duplicatas
-                    const exists = prev.some(p => p.id === payload.new.id);
-                    if (exists) return prev;
-                    return [...prev, payload.new as DeliveryProduct];
-                  });
-                }
-                break;
-                
-              case 'UPDATE':
-                if (payload.new) {
-                  console.log('✏️ Produto atualizado:', payload.new);
-                  setProducts(prev => 
-                    prev.map(p => 
-                      p.id === payload.new.id ? payload.new as DeliveryProduct : p
-                    )
-                  );
-                }
-                break;
-                
-              case 'DELETE':
-                if (payload.old) {
-                  console.log('🗑️ Produto removido:', payload.old);
-                  setProducts(prev => 
-                    prev.filter(p => p.id !== payload.old.id)
-                  );
-                }
-                break;
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log('📡 Status da subscription:', status);
-          if (status === 'SUBSCRIBED') {
-            console.log('✅ Subscription em tempo real ativa para produtos');
-          }
-        });
+    if (searchTerm) {
+      result = result.filter(product => 
+        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        product.description.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    
+    if (selectedCategory !== 'all') {
+      result = result.filter(p => p.category === selectedCategory);
+    }
+    
+    return result;
+  }, [products, searchTerm, selectedCategory]);
+
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(price);
+  };
+
+  // Função para validar o formulário
+  const validateForm = (formData: ProductFormData): Record<string, string> => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.name.trim()) {
+      errors.name = 'Nome é obrigatório';
     }
 
-    return () => {
-      if (channel) {
-        console.log('🔌 Desconectando subscription em tempo real...');
-        channel.unsubscribe();
-      }
-    };
-  }, []);
+    if (!formData.description.trim()) {
+      errors.description = 'Descrição é obrigatória';
+    }
 
-  useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
+    if (formData.price <= 0) {
+      errors.price = 'Preço deve ser maior que zero';
+    }
 
-  return {
-    products,
-    loading,
-    error,
-    createProduct,
-    updateProduct,
-    deleteProduct,
-    refetch: fetchProducts
+    if (formData.is_weighable && (!formData.price_per_gram || formData.price_per_gram <= 0)) {
+      errors.price_per_gram = 'Preço por grama é obrigatório para produtos pesáveis';
+    }
+
+    return errors;
   };
+
+  // Função para criar novo produto
+  const handleCreate = () => {
+    console.log('🆕 Criando novo produto...');
+    setEditingProduct({
+      id: '',
+      name: '',
+      category: 'acai',
+      price: 0,
+      description: '',
+      image_url: '',
+      is_active: true,
+      is_weighable: false,
+      availability_type: 'always'
+    });
+    setIsCreating(true);
+    setFormErrors({});
+  };
+
+  // Função para editar produto existente
+  const handleEdit = (product: any) => {
+    console.log('✏️ Editando produto:', product);
+    setEditingProduct({
+      id: product.id,
+      name: product.name || '',
+      category: product.category || 'acai',
+      price: product.price || 0,
+      original_price: product.original_price,
+      description: product.description || '',
+      image_url: product.image_url || '',
+      is_active: product.is_active !== false,
+      is_weighable: product.is_weighable || false,
+      price_per_gram: product.price_per_gram,
+      complement_groups: product.complement_groups,
+      sizes: product.sizes,
+      scheduled_days: product.scheduled_days,
+      availability_type: product.availability_type || 'always'
+    });
+    setIsCreating(false);
+    setFormErrors({});
+  };
+
+  // Função para cancelar edição
+  const handleCancel = () => {
+    console.log('❌ Cancelando edição...');
+    setEditingProduct(null);
+    setIsCreating(false);
+    setFormErrors({});
+  };
+
+  // Função principal de submit do formulário
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault(); // CRÍTICO: Previne o refresh da página
+    
+    if (!editingProduct) {
+      console.error('❌ Nenhum produto sendo editado');
+      return;
+    }
+
+    console.log('💾 Iniciando salvamento do produto...', editingProduct);
+    setLastSaveAttempt(new Date());
+
+    // Validar formulário
+    const errors = validateForm(editingProduct);
+    if (Object.keys(errors).length > 0) {
+      console.error('❌ Erros de validação:', errors);
+      setFormErrors(errors);
+      return;
+    }
+
+    setSaving(true);
+    setFormErrors({});
+
+    try {
+      if (isCreating) {
+        console.log('🆕 Criando novo produto...');
+        const { id, ...productData } = editingProduct;
+        await createProduct(productData);
+        console.log('✅ Produto criado com sucesso');
+      } else {
+        console.log('✏️ Atualizando produto existente...', editingProduct.id);
+        
+        // Verificar se o ID existe
+        if (!editingProduct.id) {
+          throw new Error('ID do produto não encontrado');
+        }
+
+        await updateProduct(editingProduct.id, editingProduct);
+        console.log('✅ Produto atualizado com sucesso');
+      }
+
+      // Fechar modal e limpar estado
+      setEditingProduct(null);
+      setIsCreating(false);
+      
+      // Mostrar feedback de sucesso
+      showSuccessMessage(isCreating ? 'Produto criado com sucesso!' : 'Produto atualizado com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ Erro ao salvar produto:', error);
+      
+      // Mostrar erro específico
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao salvar produto';
+      setFormErrors({ general: errorMessage });
+      
+      // Verificar se é erro de autenticação
+      if (errorMessage.includes('auth') || errorMessage.includes('permission')) {
+        setFormErrors({ 
+          general: 'Erro de autenticação. Verifique se você está logado e tem permissão para editar produtos.' 
+        });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Função para mostrar mensagem de sucesso
+  const showSuccessMessage = (message: string) => {
+    const successDiv = document.createElement('div');
+    successDiv.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2';
+    successDiv.innerHTML = `
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+      </svg>
+      ${message}
+    `;
+    document.body.appendChild(successDiv);
+    
+    setTimeout(() => {
+      if (document.body.contains(successDiv)) {
+        document.body.removeChild(successDiv);
+      }
+    }, 3000);
+  };
+
+  // Função para deletar produto
+  const handleDelete = async (id: string, name: string) => {
+    if (confirm(`Tem certeza que deseja excluir "${name}"?`)) {
+      try {
+        await deleteProduct(id);
+        showSuccessMessage('Produto excluído com sucesso!');
+      } catch (error) {
+        console.error('Erro ao excluir produto:', error);
+        alert('Erro ao excluir produto');
+      }
+    }
+  };
+
+  // Função para alternar status ativo/inativo
+  const handleToggleActive = async (product: any) => {
+    try {
+      await updateProduct(product.id, { is_active: !product.is_active });
+      showSuccessMessage(`Produto ${!product.is_active ? 'ativado' : 'desativado'} com sucesso!`);
+    } catch (error) {
+      console.error('Erro ao alterar status:', error);
+      alert('Erro ao alterar status do produto');
+    }
+  };
+
+  // Função para atualizar campo do formulário
+  const updateFormField = (field: keyof ProductFormData, value: any) => {
+    if (!editingProduct) return;
+    
+    setEditingProduct(prev => ({
+      ...prev!,
+      [field]: value
+    }));
+    
+    // Limpar erro do campo quando o usuário começar a digitar
+    if (formErrors[field]) {
+      setFormErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+        <span className="ml-2 text-gray-600">Carregando produtos...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+            <Package size={24} className="text-purple-600" />
+            Gerenciar Produtos
+          </h2>
+          <p className="text-gray-600">Configure produtos, preços e disponibilidade</p>
+        </div>
+        <button
+          onClick={handleCreate}
+          type="button"
+          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+        >
+          <Plus size={20} />
+          Novo Produto
+        </button>
+      </div>
+
+      {/* Search and Filter */}
+      <div className="bg-white rounded-xl shadow-sm p-4">
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex-1">
+            <div className="relative">
+              <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar produtos..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+          </div>
+
+          <div className="lg:w-64">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {categories.map(cat => (
+                <option key={cat.id} value={cat.id}>{cat.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Products List */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left py-3 px-4 font-medium text-gray-700">Produto</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700">Categoria</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700">Preço</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredProducts.map((product) => (
+                <tr key={product.id} className="hover:bg-gray-50">
+                  <td className="py-4 px-4">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={product.image_url || 'https://via.placeholder.com/50'}
+                        alt={product.name}
+                        className="w-12 h-12 object-cover rounded-lg"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-800">{product.name}</div>
+                        <div className="text-sm text-gray-500">{product.description}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-4 px-4">
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                      {categories.find(c => c.id === product.category)?.label || product.category}
+                    </span>
+                  </td>
+                  <td className="py-4 px-4">
+                    <div className="font-semibold text-green-600">
+                      {formatPrice(product.price)}
+                    </div>
+                    {product.original_price && product.original_price > product.price && (
+                      <div className="text-sm text-gray-500 line-through">
+                        {formatPrice(product.original_price)}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-4 px-4">
+                    <button
+                      onClick={() => handleToggleActive(product)}
+                      type="button"
+                      className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                        product.is_active
+                          ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                          : 'bg-red-100 text-red-800 hover:bg-red-200'
+                      }`}
+                    >
+                      {product.is_active ? (
+                        <>
+                          <Eye size={12} />
+                          Ativo
+                        </>
+                      ) : (
+                        <>
+                          <EyeOff size={12} />
+                          Inativo
+                        </>
+                      )}
+                    </button>
+                  </td>
+                  <td className="py-4 px-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEdit(product)}
+                        type="button"
+                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
+                        title="Editar produto"
+                      >
+                        <Edit3 size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(product.id, product.name)}
+                        type="button"
+                        className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                        title="Excluir produto"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {filteredProducts.length === 0 && (
+          <div className="text-center py-12">
+            <Package size={48} className="mx-auto text-gray-300 mb-4" />
+            <p className="text-gray-500">
+              {searchTerm || selectedCategory !== 'all' 
+                ? 'Nenhum produto encontrado' 
+                : 'Nenhum produto cadastrado'
+              }
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Edit/Create Modal */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-800">
+                  {isCreating ? 'Novo Produto' : 'Editar Produto'}
+                </h2>
+                <button
+                  onClick={handleCancel}
+                  type="button"
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* FORMULÁRIO CORRIGIDO */}
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              {/* Erro geral */}
+              {formErrors.general && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={16} className="text-red-600" />
+                    <p className="text-red-600 text-sm">{formErrors.general}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Debug info */}
+              {lastSaveAttempt && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-blue-600 text-sm">
+                    Última tentativa de salvamento: {lastSaveAttempt.toLocaleTimeString()}
+                  </p>
+                  {editingProduct.id && (
+                    <p className="text-blue-600 text-xs">ID do produto: {editingProduct.id}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Nome */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nome do Produto *
+                </label>
+                <input
+                  type="text"
+                  value={editingProduct.name}
+                  onChange={(e) => updateFormField('name', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                    formErrors.name ? 'border-red-300' : 'border-gray-300'
+                  }`}
+                  placeholder="Ex: Açaí Premium 500g"
+                  required
+                />
+                {formErrors.name && (
+                  <p className="text-red-600 text-sm mt-1">{formErrors.name}</p>
+                )}
+              </div>
+
+              {/* Categoria */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Categoria *
+                </label>
+                <select
+                  value={editingProduct.category}
+                  onChange={(e) => updateFormField('category', e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  required
+                >
+                  {categories.filter(cat => cat.id !== 'all').map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Preço */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Preço (R$) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editingProduct.price}
+                  onChange={(e) => updateFormField('price', parseFloat(e.target.value) || 0)}
+                  className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                    formErrors.price ? 'border-red-300' : 'border-gray-300'
+                  }`}
+                  placeholder="0.00"
+                  required
+                />
+                {formErrors.price && (
+                  <p className="text-red-600 text-sm mt-1">{formErrors.price}</p>
+                )}
+              </div>
+
+              {/* Preço Original (Promoção) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Preço Original (R$) - Opcional
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editingProduct.original_price || ''}
+                  onChange={(e) => updateFormField('original_price', parseFloat(e.target.value) || undefined)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Deixe em branco se não for uma promoção
+                </p>
+              </div>
+
+              {/* Descrição */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Descrição *
+                </label>
+                <textarea
+                  value={editingProduct.description}
+                  onChange={(e) => updateFormField('description', e.target.value)}
+                  className={`w-full p-3 border rounded-lg resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                    formErrors.description ? 'border-red-300' : 'border-gray-300'
+                  }`}
+                  placeholder="Descrição do produto..."
+                  required
+                />
+                {formErrors.description && (
+                  <p className="text-red-600 text-sm mt-1">{formErrors.description}</p>
+                )}
+              </div>
+
+              {/* Imagem */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Imagem do Produto
+                </label>
+                <div className="flex items-center gap-4">
+                  <img
+                    src={editingProduct.image_url || 'https://via.placeholder.com/100'}
+                    alt="Preview"
+                    className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+                  />
+                  <button
+                    onClick={() => setShowImageUpload(true)}
+                    type="button"
+                    className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    <ImageIcon size={16} />
+                    Alterar Imagem
+                  </button>
+                </div>
+              </div>
+
+              {/* Produto Pesável */}
+              <div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={editingProduct.is_weighable}
+                    onChange={(e) => updateFormField('is_weighable', e.target.checked)}
+                    className="w-4 h-4 text-purple-600"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    Produto pesável (vendido por peso)
+                  </span>
+                </label>
+              </div>
+
+              {/* Preço por grama (se pesável) */}
+              {editingProduct.is_weighable && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Preço por grama (R$) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={editingProduct.price_per_gram || ''}
+                    onChange={(e) => updateFormField('price_per_gram', parseFloat(e.target.value) || undefined)}
+                    className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                      formErrors.price_per_gram ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                    placeholder="0.0000"
+                    required
+                  />
+                  {formErrors.price_per_gram && (
+                    <p className="text-red-600 text-sm mt-1">{formErrors.price_per_gram}</p>
+                  )}
+                  {editingProduct.price_per_gram && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Preço por kg: {formatPrice((editingProduct.price_per_gram || 0) * 1000)}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Status Ativo */}
+              <div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={editingProduct.is_active}
+                    onChange={(e) => updateFormField('is_active', e.target.checked)}
+                    className="w-4 h-4 text-purple-600"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    Produto ativo (visível no cardápio)
+                  </span>
+                </label>
+              </div>
+
+              {/* Botões do formulário */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <button
+                  onClick={handleCancel}
+                  type="button"
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg transition-colors flex items-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={16} />
+                      {isCreating ? 'Criar Produto' : 'Salvar Alterações'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Image Upload Modal */}
+      {showImageUpload && (
+        <ImageUploadModal
+          isOpen={showImageUpload}
+          onClose={() => setShowImageUpload(false)}
+          onSelectImage={(imageUrl) => {
+            updateFormField('image_url', imageUrl);
+            setShowImageUpload(false);
+          }}
+          currentImage={editingProduct?.image_url}
+        />
+      )}
+    </div>
+  );
 };
+
+export default ProductsPanel;
