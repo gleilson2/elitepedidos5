@@ -174,28 +174,28 @@ export const useDeliveryProducts = () => {
 
       if (error) {
         console.error('❌ Erro ao atualizar produto:', error);
+        
+        // Verificar tipos específicos de erro
+        if (error.code === 'PGRST301') {
+          throw new Error('Nenhuma linha foi atualizada. Verifique se o produto ainda existe.');
+        }
+        if (error.code === '42501') {
+          throw new Error('Sem permissão para atualizar produtos. Verifique suas credenciais.');
+        }
+        if (error.message.includes('auth')) {
+          throw new Error('Erro de autenticação. Faça login novamente.');
+        }
+        
         throw new Error(`Erro ao atualizar produto: ${error.message || 'Erro desconhecido'}`);
       }
 
-      if (!updatedData) {
-        // No rows were updated - values were already the same
-        console.log('ℹ️ Nenhuma linha foi atualizada - valores já eram os mesmos');
-        
-        // Return the existing product with updates applied
-        const updatedProduct = {
-          ...existingProduct,
-          ...cleanUpdates,
-          updated_at: new Date().toISOString()
-        };
-        
-        // Update local state
-        setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
-        
-        console.log('✅ Produto atualizado localmente (sem mudanças no banco)');
-        return updatedProduct;
-      }
 
-      const updatedProduct = updatedData;
+      const updatedProduct = updatedData || {
+        ...existingProduct,
+        ...cleanUpdates,
+        updated_at: new Date().toISOString()
+      };
+      
       console.log('✅ Produto atualizado no banco:', updatedProduct);
 
       // Update local state
