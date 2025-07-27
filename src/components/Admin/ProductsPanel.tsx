@@ -1,330 +1,312 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import React, { useState } from 'react';
+import { Plus, Package, Edit, Trash2, Save, X } from 'lucide-react';
+import { useDeliveryProducts, type DeliveryProduct } from '../../hooks/useDeliveryProducts';
 
-export interface DeliveryProduct {
-  id: string;
-  name: string;
-  category: 'acai' | 'combo' | 'milkshake' | 'vitamina' | 'sorvetes' | 'bebidas' | 'complementos' | 'sobremesas' | 'outros';
-  price: number;
-  original_price?: number;
-  description: string;
-  image_url?: string;
-  is_active: boolean;
-  is_weighable: boolean;
-  price_per_gram?: number;
-  complement_groups?: any;
-  sizes?: any;
-  scheduled_days?: any;
-  availability_type?: string;
-  created_at: string;
-  updated_at: string;
-}
+const ProductsPanel: React.FC = () => {
+  const { products, loading, error, createProduct, updateProduct, deleteProduct } = useDeliveryProducts();
+  const [isCreating, setIsCreating] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<DeliveryProduct | null>(null);
+  const [formData, setFormData] = useState<Partial<DeliveryProduct>>({});
 
-export const useDeliveryProducts = () => {
-  const [products, setProducts] = useState<DeliveryProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchProducts = useCallback(async () => {
+  const handleCreateProduct = async (e: React.MouseEvent) => {
+    e.preventDefault();
     try {
-      setLoading(true);
-      setError(null);
-      
-      // Check if Supabase is properly configured
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
-      if (!supabaseUrl || !supabaseKey || 
-          supabaseUrl === 'your_supabase_url_here' || 
-          supabaseKey === 'your_supabase_anon_key_here' ||
-          supabaseUrl.includes('placeholder')) {
-        console.warn('⚠️ Supabase não configurado - usando produtos de demonstração');
-        
-        // Fallback para produtos de demonstração se Supabase não estiver configurado
-        const { products: demoProducts } = await import('../data/products');
-        const mappedProducts = demoProducts.map(product => ({
-          id: product.id,
-          name: product.name,
-          category: product.category as DeliveryProduct['category'],
-          price: product.price,
-          original_price: product.originalPrice,
-          description: product.description,
-          image_url: product.image,
-          is_active: product.isActive !== false,
-          is_weighable: product.is_weighable || false,
-          price_per_gram: product.pricePerGram,
-          complement_groups: product.complementGroups,
-          sizes: product.sizes,
-          scheduled_days: product.scheduledDays,
-          availability_type: product.availability?.type || 'always',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }));
-        
-        setProducts(mappedProducts);
-        setLoading(false);
-        return;
-      }
-      
-      console.log('🔄 Carregando produtos do banco de dados...');
-      
-      const { data, error } = await supabase
-        .from('delivery_products')
-        .select('*')
-        .order('name');
-
-      if (error) throw error;
-      
-      console.log(`✅ ${data?.length || 0} produtos carregados do banco`);
-      setProducts(data || []);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Erro ao carregar produtos';
-      console.error('❌ Erro ao carregar produtos:', errorMessage);
-      setError(errorMessage);
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const createProduct = useCallback(async (product: Omit<DeliveryProduct, 'id' | 'created_at' | 'updated_at'>) => {
-    try {
-      console.log('🚀 Criando produto:', product);
-      
-      const { data, error } = await supabase
-        .from('delivery_products')
-        .insert([{
-          ...product,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      
-      setProducts(prev => [...prev, data]);
-      console.log('✅ Produto criado:', data);
-      return data;
-    } catch (err) {
-      console.error('❌ Erro ao criar produto:', err);
-      throw new Error(err instanceof Error ? err.message : 'Erro ao criar produto');
-    }
-  }, []);
-
-  const updateProduct = useCallback(async (id: string, updates: Partial<DeliveryProduct>) => {
-    try {
-      console.log('✏️ Atualizando produto:', id, updates);
-
-      // Check if Supabase is configured
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-        throw new Error('Supabase não configurado. Configure as variáveis de ambiente para usar esta funcionalidade.');
-      }
-
-      // 1. First check if the product exists in the database
-      const { data: existingProduct, error: checkError } = await supabase
-        .from('delivery_products')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (checkError) {
-        console.error('❌ Erro ao verificar produto existente:', checkError);
-        throw new Error(`Erro ao verificar produto: ${checkError.message}`);
-      }
-
-      if (!existingProduct) {
-        console.error('❌ Produto não encontrado no banco:', id);
-        console.log('🔍 Produtos disponíveis no estado local:', products.map(p => ({ id: p.id, name: p.name })));
-        
-        // Try to refresh products from database
-        console.log('🔄 Tentando recarregar produtos do banco...');
-        await fetchProducts();
-        
-        throw new Error(`Produto com ID ${id} não foi encontrado no banco de dados. O produto pode ter sido excluído ou criado apenas localmente. Tente recarregar a página.`);
-      }
-
-      console.log('✅ Produto encontrado no banco:', existingProduct);
-
-      // 2. Prepare clean update data
-      const { created_at, updated_at, has_complements, ...cleanUpdates } = updates as any;
-
-      // 3. Remove undefined values and add updated_at
-      const safeUpdate = Object.fromEntries(
-        Object.entries({
-          ...cleanUpdates,
-          updated_at: new Date().toISOString()
-        }).filter(([, value]) => value !== undefined)
-      );
-
-      console.log('📝 Dados para atualização:', {
-        id,
-        safeUpdate,
-        originalUpdates: updates
+      await createProduct({
+        name: formData.name || '',
+        category: formData.category || 'outros',
+        price: formData.price || 0,
+        description: formData.description || '',
+        is_active: formData.is_active ?? true,
+        is_weighable: formData.is_weighable || false,
+        image_url: formData.image_url,
+        original_price: formData.original_price,
+        price_per_gram: formData.price_per_gram,
+        complement_groups: formData.complement_groups,
+        sizes: formData.sizes,
+        scheduled_days: formData.scheduled_days,
+        availability_type: formData.availability_type || 'always'
       });
-
-      // 4. Perform the update
-      const { data: updatedData, error } = await supabase
-        .from('delivery_products')
-        .update(safeUpdate)
-        .eq('id', id)
-        .select('*')
-        .single();
-
-      if (error) {
-        console.error('❌ Erro ao atualizar produto:', error);
-        throw new Error(`Erro ao atualizar produto: ${error.message || 'Erro desconhecido'}`);
-      }
-
-      if (!updatedData) {
-        // No rows were updated - values were already the same
-        console.log('ℹ️ Nenhuma linha foi atualizada - valores já eram os mesmos');
-        
-        // Return the existing product with updates applied
-        const updatedProduct = {
-          ...existingProduct,
-          ...cleanUpdates,
-          updated_at: new Date().toISOString()
-        };
-        
-        // Update local state
-        setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
-        
-        console.log('✅ Produto atualizado localmente (sem mudanças no banco)');
-        return updatedProduct;
-      }
-
-      const updatedProduct = updatedData;
-      console.log('✅ Produto atualizado no banco:', updatedProduct);
-
-      // Update local state
-      setProducts(prev => prev.map(p => p.id === id ? updatedProduct : p));
-      
-      console.log('✅ Estado local atualizado');
-      return updatedProduct;
-
+      setIsCreating(false);
+      setFormData({});
     } catch (err) {
-      console.error('❌ Erro ao atualizar produto:', err);
-      throw err;
+      console.error('Erro ao criar produto:', err);
+      alert('Erro ao criar produto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
     }
-  }, [fetchProducts, products]);
-
-  const syncWithDatabase = useCallback(async () => {
-    console.log('🔄 Sincronizando produtos com banco de dados...');
-    await fetchProducts();
-  }, [fetchProducts]);
-
-  const deleteProduct = useCallback(async (id: string) => {
-    try {
-      console.log('🗑️ Excluindo produto:', id);
-      
-      const { data: updatedData, error } = await supabase
-        .from('delivery_products')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      
-      setProducts(prev => prev.filter(p => p.id !== id));
-      console.log('✅ Produto excluído');
-    } catch (err) {
-      console.error('❌ Erro ao excluir produto:', err);
-      throw new Error(err instanceof Error ? err.message : 'Erro ao excluir produto');
-    }
-  }, []);
-
-  // Configurar subscription em tempo real
-  useEffect(() => {
-    let channel: RealtimeChannel | null = null;
-
-    // Verificar se Supabase está configurado
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseKey || 
-        supabaseUrl === 'your_supabase_url_here' || 
-        supabaseKey === 'your_supabase_anon_key_here' ||
-        supabaseUrl.includes('placeholder')) {
-      console.log('⚠️ Supabase não configurado - subscription em tempo real desabilitada');
-    } else {
-      console.log('🔄 Configurando subscription em tempo real para produtos...');
-      
-      channel = supabase
-        .channel('delivery_products_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'delivery_products'
-          },
-          (payload) => {
-            console.log('📡 Mudança detectada na tabela delivery_products:', payload);
-            
-            switch (payload.eventType) {
-              case 'INSERT':
-                if (payload.new) {
-                  console.log('➕ Produto adicionado:', payload.new);
-                  setProducts(prev => {
-                    // Verificar se o produto já existe para evitar duplicatas
-                    const exists = prev.some(p => p.id === payload.new.id);
-                    if (exists) return prev;
-                    return [...prev, payload.new as DeliveryProduct];
-                  });
-                }
-                break;
-                
-              case 'UPDATE':
-                if (payload.new) {
-                  console.log('✏️ Produto atualizado:', payload.new);
-                  setProducts(prev => 
-                    prev.map(p => 
-                      p.id === payload.new.id ? payload.new as DeliveryProduct : p
-                    )
-                  );
-                }
-                break;
-                
-              case 'DELETE':
-                if (payload.old) {
-                  console.log('🗑️ Produto removido:', payload.old);
-                  setProducts(prev => 
-                    prev.filter(p => p.id !== payload.old.id)
-                  );
-                }
-                break;
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log('📡 Status da subscription:', status);
-          if (status === 'SUBSCRIBED') {
-            console.log('✅ Subscription em tempo real ativa para produtos');
-          }
-        });
-    }
-
-    return () => {
-      if (channel) {
-        console.log('🔌 Desconectando subscription em tempo real...');
-        channel.unsubscribe();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
-
-  return {
-    products,
-    loading,
-    error,
-    createProduct,
-    updateProduct,
-    deleteProduct,
-    refetch: fetchProducts
   };
+
+  const handleUpdateProduct = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+    
+    try {
+      await updateProduct(editingProduct.id, formData);
+      setEditingProduct(null);
+      setFormData({});
+    } catch (err) {
+      console.error('Erro ao atualizar produto:', err);
+      alert('Erro ao atualizar produto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    if (!confirm('Tem certeza que deseja excluir este produto?')) return;
+    
+    try {
+      await deleteProduct(id);
+    } catch (err) {
+      console.error('Erro ao excluir produto:', err);
+      alert('Erro ao excluir produto: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+    }
+  };
+
+  const startEdit = (product: DeliveryProduct) => {
+    setEditingProduct(product);
+    setFormData(product);
+  };
+
+  const cancelEdit = () => {
+    setEditingProduct(null);
+    setFormData({});
+    setIsCreating(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <span className="ml-2">Carregando produtos...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <p className="text-red-800">Erro: {error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <Package className="w-6 h-6 text-blue-600" />
+          <h2 className="text-2xl font-bold text-gray-900">Produtos</h2>
+        </div>
+        <button
+          onClick={() => setIsCreating(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Novo Produto</span>
+        </button>
+      </div>
+
+      {/* Form for creating/editing */}
+      {(isCreating || editingProduct) && (
+        <div className="bg-white p-6 rounded-lg border border-gray-200 space-y-4">
+          <h3 className="text-lg font-semibold">
+            {isCreating ? 'Criar Novo Produto' : 'Editar Produto'}
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
+              <input
+                type="text"
+                value={formData.name || ''}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Nome do produto"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+              <select
+                value={formData.category || 'outros'}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value as DeliveryProduct['category'] })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="acai">Açaí</option>
+                <option value="combo">Combo</option>
+                <option value="milkshake">Milkshake</option>
+                <option value="vitamina">Vitamina</option>
+                <option value="sorvetes">Sorvetes</option>
+                <option value="bebidas">Bebidas</option>
+                <option value="complementos">Complementos</option>
+                <option value="sobremesas">Sobremesas</option>
+                <option value="outros">Outros</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Preço (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.price || ''}
+                onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">URL da Imagem</label>
+              <input
+                type="url"
+                value={formData.image_url || ''}
+                onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="https://..."
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+              <textarea
+                value={formData.description || ''}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+                placeholder="Descrição do produto"
+              />
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={formData.is_active ?? true}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                  className="mr-2"
+                />
+                Ativo
+              </label>
+
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={formData.is_weighable || false}
+                  onChange={(e) => setFormData({ ...formData, is_weighable: e.target.checked })}
+                  className="mr-2"
+                />
+                Pesável
+              </label>
+            </div>
+          </div>
+
+          <div className="flex space-x-2">
+            <button
+              type="button"
+              onClick={isCreating ? handleCreateProduct : handleUpdateProduct}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center space-x-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>Salvar</span>
+            </button>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 flex items-center space-x-2"
+            >
+              <X className="w-4 h-4" />
+              <span>Cancelar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Products list */}
+      <div className="bg-white rounded-lg border border-gray-200">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Produto
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Categoria
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Preço
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Ações
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {products.map((product) => (
+                <tr key={product.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      {product.image_url && (
+                        <img
+                          src={product.image_url}
+                          alt={product.name}
+                          className="h-10 w-10 rounded-full object-cover mr-3"
+                        />
+                      )}
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{product.name}</div>
+                        <div className="text-sm text-gray-500">{product.description}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                      {product.category}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    R$ {product.price.toFixed(2)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      product.is_active 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {product.is_active ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => startEdit(product)}
+                        className="text-blue-600 hover:text-blue-900"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProduct(product.id)}
+                        className="text-red-600 hover:text-red-900"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {products.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          Nenhum produto encontrado. Clique em "Novo Produto" para adicionar o primeiro.
+        </div>
+      )}
+    </div>
+  );
 };
+
+export default ProductsPanel;
